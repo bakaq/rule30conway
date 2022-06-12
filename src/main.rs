@@ -1,14 +1,17 @@
 #![allow(dead_code)]
 
 use std::collections::VecDeque;
+use std::sync::{Arc, Mutex};
 
 use sdl2;
 
-use sdl2::pixels::Color;
-use sdl2::event::Event;
-use sdl2::render::Canvas;
-use sdl2::video::Window;
-use sdl2::rect::Rect;
+use sdl2::{
+    pixels::Color,
+    event::Event,
+    render::Canvas,
+    video::Window,
+    rect::Rect,
+};
 
 #[derive(Clone, Debug)]
 struct Rule30 {
@@ -42,10 +45,25 @@ impl Rule30 {
         Rule30 { buffer, width, height }
     }
 
-    fn get_next_line(&mut self) -> Vec<u8> {
-        let new_line = rule30_next_line(&self.buffer[self.height-1]);
+    fn step(&mut self) -> Vec<u8> {
+        let new_line = self.get_next_line();
         self.buffer.push_back(new_line);
         self.buffer.pop_front().unwrap()
+    }
+
+    fn get_next_line(&self) -> Vec<u8> {
+        let line = &self.buffer[self.height-1];
+        let mut next_line = vec![0; self.width];
+
+        for i in 0..self.width {
+            let prev = line[if i == 0 { self.width-1 } else { i - 1 }];
+            let mid = line[i];
+            let next = line[(i+1) % self.width];
+            let code = (prev << 2) | (mid << 1) | next;
+            next_line[i] = (30 & (1 << code)) >> code;
+        }
+
+        next_line
     }
 
     fn draw(&self, canvas: &mut Canvas<Window>, offx: usize, offy: usize, scale: usize) {
@@ -181,7 +199,7 @@ impl Rule30Conway {
     }
 
     fn step(&mut self) {
-        let line = self.rule30.get_next_line();
+        let line = self.rule30.step();
         let base_idx = (self.conway.height-1)*self.conway.width;
         for i in 0..self.conway.width {
             let (buffer, _) = self.conway.get_buffers_mut();
@@ -217,35 +235,32 @@ fn main() {
     canvas.clear();
 
     // Setup Rule30Conway
-    let mut rule30conway = Rule30Conway::new(
-        screen_size[0] as usize,
-        screen_size[1] as usize,
-    );
-    rule30conway.draw(&mut canvas, scale as usize);
+    let rule30conway_mutex = Arc::new(Mutex::new(
+            Rule30Conway::new(
+            screen_size[0] as usize,
+            screen_size[1] as usize,
+        )
+    ));
 
-    /*
-    let (b,_) = rule30conway.conway.get_buffers_mut();
-    let w = screen_size[0] as usize;
-    let idx = (screen_size[1]/4 * (w as u32) + (w as u32)/2) as usize;
-    
-    /*
-    // A glider
-    b[idx + 2] = 1;
-    b[idx + w] = 1;
-    b[idx + w + 2] = 1;
-    b[idx + 2*w + 1] = 1;
-    b[idx + 2*w + 2] = 1;
-    */
-
-    // A blinker
-    b[idx] = 1;
-    b[idx + w] = 1;
-    b[idx + 2*w] = 1;
-
-    //rule30conway.step();
-    */
+    {
+        let rule30conway = rule30conway_mutex.lock().unwrap();
+        rule30conway.draw(&mut canvas, scale as usize);
+    }
 
     canvas.present();
+
+    // Compute thread
+    let rule30conway_mutex2 = Arc::clone(&rule30conway_mutex);
+    std::thread::spawn(move || {
+        loop {
+            {
+                let mut rule30conway = rule30conway_mutex2.lock().unwrap();
+                rule30conway.step();
+            }
+            let speed = 10;
+            std::thread::sleep(std::time::Duration::new(0, 1_000_000_000u32 / 60 / speed));
+        }
+    });
 
     // Main loop
     let mut event_pump = sdl_context.event_pump().unwrap();
@@ -261,14 +276,17 @@ fn main() {
         }
 
         // Calculate
-        rule30conway.step();
+        //rule30conway.step();
 
         // Clear canvas
         canvas.set_draw_color(Color::WHITE);
         canvas.clear();
 
         // Draw
-        rule30conway.draw(&mut canvas, scale as usize);
+        {
+            let rule30conway = rule30conway_mutex.lock().unwrap();
+            rule30conway.draw(&mut canvas, scale as usize);
+        }
 
         canvas.present();
 
