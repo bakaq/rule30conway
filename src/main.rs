@@ -1,7 +1,10 @@
 #![allow(dead_code)]
 
 use std::collections::VecDeque;
-use std::sync::{Arc, Mutex};
+use std::sync::{
+    Arc,
+    Mutex,
+};
 
 use sdl2;
 
@@ -11,6 +14,7 @@ use sdl2::{
     render::Canvas,
     video::Window,
     rect::Rect,
+    keyboard::Keycode,
 };
 
 #[derive(Clone, Debug)]
@@ -221,7 +225,7 @@ fn main() {
 
     // Setup window
     let scale = 2;
-    let screen_size = [300, 300];
+    let screen_size = [500, 300];
     let window_size = [screen_size[0]*scale, screen_size[1]*scale];
     let window = video_subsystem.window("rule30conway", window_size[0], window_size[1])
         .position_centered()
@@ -250,6 +254,8 @@ fn main() {
     canvas.present();
 
     // Compute thread
+    let speed_mutex = Arc::new(Mutex::new(1.0));
+    let speed_mutex2 = Arc::clone(&speed_mutex);
     let rule30conway_mutex2 = Arc::clone(&rule30conway_mutex);
     std::thread::spawn(move || {
         loop {
@@ -257,8 +263,10 @@ fn main() {
                 let mut rule30conway = rule30conway_mutex2.lock().unwrap();
                 rule30conway.step();
             }
-            let speed = 10;
-            std::thread::sleep(std::time::Duration::new(0, 1_000_000_000u32 / 60 / speed));
+            let speed = {
+                speed_mutex2.lock().unwrap().clone()
+            };
+            std::thread::sleep(std::time::Duration::from_secs_f64( (1.0/60.0) / speed ));
         }
     });
 
@@ -268,15 +276,28 @@ fn main() {
         for event in event_pump.poll_iter() {
             // Handle events
             match event {
-                Event::Quit {..} => {
+                Event::Quit {..} |
+                Event::KeyDown { keycode: Some(Keycode::Q), .. } => {
                     break 'running
+                },
+                Event::KeyDown { keycode: Some(Keycode::Up), .. } => {
+                    *speed_mutex.lock().unwrap() *= 1.1;
+                }
+                Event::KeyDown { keycode: Some(Keycode::Down), .. } => {
+                    *speed_mutex.lock().unwrap() *= 0.9;
+                }
+                Event::KeyDown { keycode: Some(Keycode::Right), .. } => {
+                    *speed_mutex.lock().unwrap() *= 2.0;
+                }
+                Event::KeyDown { keycode: Some(Keycode::Left), .. } => {
+                    *speed_mutex.lock().unwrap() *= 0.9;
+                }
+                Event::KeyDown { keycode: Some(Keycode::R), .. } => {
+                    *speed_mutex.lock().unwrap() = 1.0;
                 }
                 _ => {}
             }
         }
-
-        // Calculate
-        //rule30conway.step();
 
         // Clear canvas
         canvas.set_draw_color(Color::WHITE);
