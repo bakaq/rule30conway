@@ -48,17 +48,19 @@ impl Rule30 {
         self.buffer.pop_front().unwrap()
     }
 
-    fn draw(&self, canvas: &mut Canvas<Window>) {
-        // Clear canvas
-        canvas.set_draw_color(Color::WHITE);
-        canvas.clear();
-
-        // Draw
+    fn draw(&self, canvas: &mut Canvas<Window>, offx: usize, offy: usize, scale: usize) {
         for y in 0..self.height {
             for x in 0..self.width {
                 let val = self.buffer[y][x];
                 canvas.set_draw_color(if val == 0 { Color::WHITE } else { Color::BLACK });
-                canvas.fill_rect(Some(Rect::new(x as i32, y as i32, 1, 1))).unwrap();
+                canvas.fill_rect(Some(
+                    Rect::new(
+                        ((x + offx) * scale) as i32,
+                        ((y + offy) * scale) as i32, 
+                        scale as u32, 
+                        scale as u32,
+                    )
+                )).unwrap();
             }
         }
     }
@@ -66,19 +68,102 @@ impl Rule30 {
 
 #[derive(Clone, Debug)]
 struct Conway {
-    buffer: Vec<u8>,
+    using_a: bool,
+    buffer_a: Vec<u8>,
+    buffer_b: Vec<u8>,
     width: usize,
     height: usize,
 }
 
 impl Conway {
     fn new(width: usize, height: usize) -> Self {
-        let buffer = vec![0; width*height];
-        Self { buffer, width, height }
+        let buffer_a = vec![0; width*height];
+        let buffer_b = vec![0; width*height];
+        Self { using_a: true, buffer_a, buffer_b, width, height }
+    }
+
+    fn get_buffers(&self) -> (&Vec<u8>, &Vec<u8>) {
+        if self.using_a {
+            (&self.buffer_a, &self.buffer_b)
+        } else {
+            (&self.buffer_b, &self.buffer_a)
+        }
+    }
+
+    fn get_buffers_mut(&mut self) -> (&mut Vec<u8>, &mut Vec<u8>) {
+        if self.using_a {
+            (&mut self.buffer_a, &mut self.buffer_b)
+        } else {
+            (&mut self.buffer_b, &mut self.buffer_a)
+        }
     }
 
     fn step(&mut self) {
-        todo!();
+        for y in 0..self.height {
+            for x in 0..self.width {
+                let w = self.width;
+                let h = self.height;
+                let (b, swap_buffer) = self.get_buffers_mut();
+
+                let i = y*w + x;
+                let neighbors = match (x, y) {
+                    (x,y) if x == 0 && y == 0 => {
+                        b[i+1] + b[i+w] + b[i+w+1]
+                    },
+                    (x,y) if x == w-1 && y == 0 => {
+                        b[i-1] + b[i+w-1] + b[i+w]
+                    },
+                    (x,y) if x == 0 && y == h-1 => {
+                        b[i-w] + b[i-w+1] + b[i+1]
+                    },
+                    (x,y) if x == w-1 && y == h-1 => {
+                        b[i-w-1] + b[i-w] + b[i-1]
+                    },
+                    (x,_) if x == 0 => {
+                        b[i-w] + b[i-w+1] + b[i+1] + b[i+w] + b[i+w+1]
+                    },
+                    (x,_) if x == w-1 => {
+                        b[i-w-1] + b[i-w] + b[i-1] + b[i+w-1] + b[i+w]
+                    },
+                    (_,y) if y == 0 => {
+                        b[i-1] + b[i+1] + b[i+w-1] + b[i+w] + b[i+w+1]
+                    },
+                    (_,y) if y == h-1 => {
+                        b[i-w-1] + b[i-w] + b[i-w+1] + b[i-1] + b[i+1]
+                    },
+                    _ => {
+                        b[i-w-1] + b[i-w] + b[i-w+1]
+                        + b[i-1] + b[i+1]
+                        + b[i+w-1] + b[i+w] + b[i+w+1]
+                    },
+                };
+
+                swap_buffer[i] = match (b[i], neighbors) {
+                    (1,2) | (1,3) | (0,3) => 1,
+                    _ => 0,
+                };
+            }
+
+        }
+        self.using_a = !self.using_a;
+    }
+
+    fn draw(&self, canvas: &mut Canvas<Window>, offx: usize, offy: usize, scale: usize) {
+        for y in 0..self.height {
+            for x in 0..self.width {
+                let (buffer, _) = self.get_buffers();
+                let val = buffer[y*self.width + x];
+                canvas.set_draw_color(if val == 0 { Color::WHITE } else { Color::BLACK });
+                canvas.fill_rect(Some(
+                    Rect::new(
+                        ((x + offx) * scale) as i32,
+                        ((y + offy) * scale) as i32, 
+                        scale as u32, 
+                        scale as u32,
+                    )
+                )).unwrap();
+            }
+        }
     }
 }
 
@@ -89,9 +174,27 @@ struct Rule30Conway {
 }
 
 impl Rule30Conway {
-    // TODO
-}
+    fn new(width: usize, height: usize) -> Self {
+        let rule30 = Rule30::new(width, height/2);
+        let conway = Conway::new(width, height/2);
+        Rule30Conway { rule30, conway }
+    }
 
+    fn step(&mut self) {
+        let line = self.rule30.get_next_line();
+        let base_idx = (self.conway.height-1)*self.conway.width;
+        for i in 0..self.conway.width {
+            let (buffer, _) = self.conway.get_buffers_mut();
+            buffer[base_idx + i] = line[i];
+        }
+        self.conway.step();
+    }
+
+    fn draw(&self, canvas: &mut Canvas<Window>, scale: usize) {
+        self.rule30.draw(canvas, 0, self.conway.height, scale);
+        self.conway.draw(canvas, 0, 0, scale);
+    }
+}
 
 fn main() {
     // Setup SDL
@@ -99,7 +202,9 @@ fn main() {
     let video_subsystem = sdl_context.video().unwrap();
 
     // Setup window
-    let window_size = [800, 600];
+    let scale = 2;
+    let screen_size = [300, 300];
+    let window_size = [screen_size[0]*scale, screen_size[1]*scale];
     let window = video_subsystem.window("rule30conway", window_size[0], window_size[1])
         .position_centered()
         .build()
@@ -111,9 +216,34 @@ fn main() {
     canvas.set_draw_color(Color::WHITE);
     canvas.clear();
 
-    // Setup rule30
-    let mut rule30 = Rule30::new(window_size[0] as usize, (window_size[1]/2) as usize);
-    rule30.draw(&mut canvas);
+    // Setup Rule30Conway
+    let mut rule30conway = Rule30Conway::new(
+        screen_size[0] as usize,
+        screen_size[1] as usize,
+    );
+    rule30conway.draw(&mut canvas, scale as usize);
+
+    /*
+    let (b,_) = rule30conway.conway.get_buffers_mut();
+    let w = screen_size[0] as usize;
+    let idx = (screen_size[1]/4 * (w as u32) + (w as u32)/2) as usize;
+    
+    /*
+    // A glider
+    b[idx + 2] = 1;
+    b[idx + w] = 1;
+    b[idx + w + 2] = 1;
+    b[idx + 2*w + 1] = 1;
+    b[idx + 2*w + 2] = 1;
+    */
+
+    // A blinker
+    b[idx] = 1;
+    b[idx + w] = 1;
+    b[idx + 2*w] = 1;
+
+    //rule30conway.step();
+    */
 
     canvas.present();
 
@@ -130,19 +260,19 @@ fn main() {
             }
         }
 
-        // TODO: Calculate
-        rule30.get_next_line();
+        // Calculate
+        rule30conway.step();
 
         // Clear canvas
         canvas.set_draw_color(Color::WHITE);
         canvas.clear();
 
-        // TODO: Draw
-        rule30.draw(&mut canvas);
+        // Draw
+        rule30conway.draw(&mut canvas, scale as usize);
 
         canvas.present();
 
         // Delay between frames
-        //std::thread::sleep(std::time::Duration::new(0, 1_000_000_000u32 / 60));
+        std::thread::sleep(std::time::Duration::new(0, 1_000_000_000u32 / 60));
     }
 }
